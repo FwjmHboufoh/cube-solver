@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Rubik's Cube Solver</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <main class="container">
+
+        <h1>Rubik's Cube Solver</h1>
+        <p class="subtitle">
+            Masukkan warna Rubik 3×3 kamu
+        </p>
+
+        <!-- Color Picker -->
+        <section class="panel">
+
+            <h2>Pilih Warna</h2>
+
+            <div id="colorPalette" class="color-palette">
+
+                <button class="color-btn white" data-color="W">
+                    White
+                </button>
+
+                <button class="color-btn yellow" data-color="Y">
+                    Yellow
+                </button>
+
+                <button class="color-btn green" data-color="G">
+                    Green
+                </button>
+
+                <button class="color-btn blue" data-color="B">
+                    Blue
+                </button>
+
+                <button class="color-btn red" data-color="R">
+                    Red
+                </button>
+
+                <button class="color-btn orange" data-color="O">
+                    Orange
+                </button>
+
+            </div>
+
+            <p id="selectedColor">
+                Warna belum dipilih
+            </p>
+
+        </section>
+
+        <!-- Cube (sticky: tetap terlihat saat scroll ke Solution) -->
+        <section id="cubePanel" class="panel cube-panel pinned">
+
+            <div class="cube-header">
+                <h2>Cube</h2>
+
+                <button type="button" id="pinBtn" class="pin-btn" aria-pressed="true">
+                    📌 Terkunci
+                </button>
+            </div>
+
+            <div id="cube3d"></div>
+
+        </section>
+
+        <!-- Controls -->
+        <section class="panel controls">
+
+            <button id="scrambleBtn">
+                Scramble
+            </button>
+
+            <button id="scanBtn">
+                Scan Kubus
+            </button>
+
+            <button id="validateBtn">
+                Validasi
+            </button>
+
+            <button id="solveBtn">
+                Solve
+            </button>
+
+            <button id="saveBtn">
+                Simpan
+            </button>
+
+            <button id="loadBtn">
+                Muat
+            </button>
+
+            <button id="resetBtn">
+                Reset
+            </button>
+
+        </section>
+
+        <!-- Status -->
+        <section class="panel">
+
+            <h2>Status</h2>
+
+            <div id="status">
+                Silakan masukkan warna Rubik.
+            </div>
+
+        </section>
+
+        <section class="panel">
+
+            <h2>Scramble</h2>
+
+            <div id="scramble">
+                Belum ada scramble.
+            </div>
+
+        </section>
+
+        <!-- Solution -->
+        <section class="panel">
+
+            <h2>Solution</h2>
+
+            <div id="solution">
+                Belum ada solusi.
+            </div>
+
+            <div class="step-controls">
+
+                <button id="previousBtn">
+                    ← Previous Move
+                </button>
+
+                <button id="playBtn">▶ Play</button>
+
+                <button id="resetSolutionBtn">Reset Solution</button>
+
+                <button id="nextBtn">
+                    Next Move →
+                </button>
+
+            </div>
+
+            <div class="speed-controls">
+    <span>Speed:</span>
+
+    <button class="speed-btn" data-speed="0.5">0.5x</button>
+    <button class="speed-btn selected" data-speed="1">1x</button>
+    <button class="speed-btn" data-speed="1.5">1.5x</button>
+    <button class="speed-btn" data-speed="2">2x</button>
+</div>
+
+            <div id="currentMove">
+                -
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- CubeJS -->
+    <script type="module" src="js/main.js"></script>
+
+</body>
+</html>
