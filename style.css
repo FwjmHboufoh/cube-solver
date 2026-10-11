@@ -380,6 +380,8 @@ button:disabled {
 #cube3d canvas {
     display: block;
 
+    touch-action: none;
+
     width: 100%;
     height: 100%;
 }

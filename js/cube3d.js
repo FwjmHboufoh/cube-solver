@@ -904,11 +904,22 @@ export class Cube3D {
   setupMouseControls() {
     const canvas = this.renderer.domElement;
 
-    canvas.addEventListener("pointerdown", (event) => {
-      if (this.isAnimating) {
-        return;
-      }
+    // Tanpa ini, browser HP menganggap geser jari = scroll halaman
+    // lalu membatalkan pointer (pointercancel), sehingga kubus
+    // hanya berputar sedikit lalu berhenti.
+    canvas.style.touchAction = "none";
+    canvas.style.userSelect = "none";
+    canvas.style.webkitUserSelect = "none";
+    canvas.style.webkitTouchCallout = "none";
 
+    // Tekan lama di HP tidak boleh memunculkan menu
+    canvas.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+    });
+
+    canvas.addEventListener("pointerdown", (event) => {
+      // Memutar tampilan tetap boleh saat animasi berjalan
+      // (hanya memutar kamera, tidak mengubah state kubus).
       this.isDragging = true;
 
       this.previousMouseX = event.clientX;
@@ -935,9 +946,11 @@ export class Cube3D {
 
       this.previousMouseY = event.clientY;
 
-      this.rotationY += deltaX * 0.01;
+      const sensitivity = event.pointerType === "touch" ? 0.013 : 0.01;
 
-      this.rotationX += deltaY * 0.01;
+      this.rotationY += deltaX * sensitivity;
+
+      this.rotationX += deltaY * sensitivity;
 
       this.rotationX = Math.max(
         -Math.PI / 2,
@@ -957,7 +970,11 @@ export class Cube3D {
           event.clientY - this.pointerDownY,
         );
 
-        if (moved < 5) {
+        // Jari bergetar lebih banyak daripada mouse,
+        // jadi batas "tap" di layar sentuh dibuat lebih longgar.
+        const tapLimit = event.pointerType === "touch" ? 10 : 5;
+
+        if (moved < tapLimit) {
           this.handleCanvasClick(event);
         }
       }
