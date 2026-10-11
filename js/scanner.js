@@ -62,6 +62,8 @@ const COLOR_CSS = {
   O: "#f28e2b",
 };
 
+const AUTO_KEY = "rubik_scan_auto";
+
 const COLOR_LETTER = { W: "P", Y: "K", G: "H", B: "B", R: "M", O: "O" };
 
 // Posisi tiap sisi pada tampilan net (kolom, baris)
@@ -237,6 +239,194 @@ export function classifyStickers(samples) {
 }
 
 // ========================================
+// EKSTRAKSI SEL (dipakai capture manual & auto)
+// ========================================
+
+function median(arr) {
+  const sorted = Array.from(arr).sort((x, y) => x - y);
+
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+// data = ImageData.data dari kanvas SAMPLE_SIZE x SAMPLE_SIZE
+export function extractCells(data, size = SAMPLE_SIZE) {
+  const margin = GRID_MARGIN * size;
+  const cell = (size - margin * 2) / 3;
+  const half = (cell * CELL_SAMPLE_RATIO) / 2;
+  const n = Math.max(2, Math.round(half * 2));
+
+  const cells = [];
+
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      const x0 = Math.round(margin + cell * (col + 0.5) - half);
+      const y0 = Math.round(margin + cell * (row + 0.5) - half);
+
+      const r = [];
+      const g = [];
+      const b = [];
+      const luma = [];
+
+      for (let y = y0; y < y0 + n; y++) {
+        for (let x = x0; x < x0 + n; x++) {
+          const i = (y * size + x) * 4;
+
+          r.push(data[i]);
+          g.push(data[i + 1]);
+          b.push(data[i + 2]);
+          luma.push(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+        }
+      }
+
+      const rgb = [median(r), median(g), median(b)];
+
+      // Seberapa merata warna di dalam sel (logo/pantulan -> besar)
+      const lumaMid = median(luma);
+      const spread =
+        luma.reduce((sum, v) => sum + Math.abs(v - lumaMid), 0) / luma.length;
+
+      cells.push({ rgb, lab: rgbToLab(rgb), spread });
+    }
+  }
+
+  return cells;
+}
+
+// ========================================
+// AUTO-AMBIL: DETEKSI KUBUS SEJAJAR DENGAN GRID
+//
+// Kubus dianggap "pas" kalau:
+//  1. Ada garis gelap (celah plastik hitam) tepat di 4 garis
+//     pembatas grid (2 vertikal + 2 horizontal), dan
+//  2. Warna di dalam tiap sel cukup merata (stiker polos).
+// Lalu harus diam beberapa frame berturut-turut.
+// ========================================
+
+const AUTO_INTERVAL_MS = 150;
+const AUTO_STABLE_FRAMES = 7; // ~1 detik
+const AUTO_REARM_DELAY_MS = 1200;
+
+const GAP_POINTS = 24;
+const GAP_WINDOW = 0.027; // setengah lebar jendela cari celah (x SAMPLE_SIZE)
+const GAP_MIN_CONTRAST = 0.22;
+const GAP_MIN_LINE_SCORE = 0.65;
+const MAX_NON_UNIFORM_CELLS = 2;
+const MAX_CELL_SPREAD = 28;
+
+export function gridAlignmentScore(data, size = SAMPLE_SIZE) {
+  const lumaAt = (x, y) => {
+    const cx = Math.min(size - 1, Math.max(0, Math.round(x)));
+    const cy = Math.min(size - 1, Math.max(0, Math.round(y)));
+    const i = (cy * size + cx) * 4;
+
+    return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  };
+
+  const margin = GRID_MARGIN * size;
+  const cell = (size - margin * 2) / 3;
+  const w = Math.round(size * GAP_WINDOW);
+
+  const start = margin + cell * 0.15;
+  const end = size - margin - cell * 0.15;
+
+  let worst = 1;
+
+  for (const k of [1, 2]) {
+    const pos = margin + cell * k;
+
+    for (const vertical of [true, false]) {
+      let passed = 0;
+
+      for (let p = 0; p < GAP_POINTS; p++) {
+        const t = start + ((end - start) * p) / (GAP_POINTS - 1);
+
+        const at = (offset) =>
+          vertical ? lumaAt(pos + offset, t) : lumaAt(t, pos + offset);
+
+        let min = 255;
+
+        for (let d = -w; d <= w; d++) {
+          min = Math.min(min, at(d));
+        }
+
+        let ref = 0;
+
+        for (const d of [w + 6, w + 10, w + 14]) {
+          ref += at(d) + at(-d);
+        }
+
+        ref /= 6;
+
+        if (ref > 35 && (ref - min) / ref > GAP_MIN_CONTRAST) {
+          passed++;
+        }
+      }
+
+      worst = Math.min(worst, passed / GAP_POINTS);
+    }
+  }
+
+  return worst;
+}
+
+export function analyzeFrame(data, size = SAMPLE_SIZE) {
+  const cells = extractCells(data, size);
+
+  const score = gridAlignmentScore(data, size);
+
+  const nonUniform = cells.filter((c) => c.spread > MAX_CELL_SPREAD).length;
+
+  return {
+    score,
+    nonUniform,
+    aligned: score >= GAP_MIN_LINE_SCORE && nonUniform <= MAX_NON_UNIFORM_CELLS,
+    rgbs: cells.map((c) => c.rgb),
+  };
+}
+
+// history = array of rgbs (9 warna) dari frame berurutan
+export function framesStable(history, tolerance = 18) {
+  if (history.length < 2) {
+    return true;
+  }
+
+  for (let cell = 0; cell < 9; cell++) {
+    for (let ch = 0; ch < 3; ch++) {
+      let min = 255;
+      let max = 0;
+
+      for (const rgbs of history) {
+        min = Math.min(min, rgbs[cell][ch]);
+        max = Math.max(max, rgbs[cell][ch]);
+      }
+
+      if (max - min > tolerance) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+// Apakah dua susunan warna jelas berbeda (kubus diputar ke sisi lain)?
+export function colorsChanged(a, b) {
+  if (!a || !b) {
+    return true;
+  }
+
+  let changed = 0;
+
+  for (let i = 0; i < 9; i++) {
+    if (Math.max(...a[i].map((v, ch) => Math.abs(v - b[i][ch]))) > 40) {
+      changed++;
+    }
+  }
+
+  return changed >= 4;
+}
+
+// ========================================
 // KOREKSI ORIENTASI SATU SISI
 // ========================================
 
@@ -269,6 +459,15 @@ export class CubeScanner {
     this.stepIndex = 0;
     this.samples = {};
 
+    // Auto-ambil
+    this.autoEnabled = false;
+    this.autoTimer = null;
+    this.audioCtx = null;
+    this.armed = true;
+    this.history = [];
+    this.lastRgbs = null;
+    this.lastCaptureAt = 0;
+
     this.sampleCanvas = document.createElement("canvas");
     this.sampleCanvas.width = SAMPLE_SIZE;
     this.sampleCanvas.height = SAMPLE_SIZE;
@@ -298,6 +497,11 @@ export class CubeScanner {
 
         <p class="scan-text"></p>
 
+        <label class="scan-auto">
+          <input type="checkbox" class="scan-auto-toggle" />
+          Auto-ambil saat kubus pas di grid
+        </label>
+
         <div class="scan-viewport">
           <video playsinline muted></video>
           <div class="scan-grid">
@@ -307,6 +511,8 @@ export class CubeScanner {
           <div class="scan-edge bottom"></div>
           <div class="scan-edge left"></div>
           <div class="scan-edge right"></div>
+          <div class="scan-auto-status" hidden></div>
+          <div class="scan-auto-bar" hidden><div></div></div>
           <div class="scan-message" hidden></div>
         </div>
 
@@ -345,6 +551,11 @@ export class CubeScanner {
     this.textEl = overlay.querySelector(".scan-text");
     this.video = overlay.querySelector("video");
     this.messageEl = overlay.querySelector(".scan-message");
+    this.viewport = overlay.querySelector(".scan-viewport");
+    this.autoToggle = overlay.querySelector(".scan-auto-toggle");
+    this.autoStatusEl = overlay.querySelector(".scan-auto-status");
+    this.autoBarEl = overlay.querySelector(".scan-auto-bar");
+    this.autoFillEl = overlay.querySelector(".scan-auto-bar > div");
     this.netEl = overlay.querySelector(".scan-net");
     this.edgeEls = {
       top: overlay.querySelector(".scan-edge.top"),
@@ -385,6 +596,32 @@ export class CubeScanner {
 
     this.uploadBtn.addEventListener("click", () => {
       this.fileInput.click();
+    });
+
+    try {
+      this.autoToggle.checked = localStorage.getItem(AUTO_KEY) === "1";
+    } catch (error) {
+      this.autoToggle.checked = false;
+    }
+
+    this.autoEnabled = this.autoToggle.checked;
+
+    this.autoToggle.addEventListener("change", () => {
+      this.autoEnabled = this.autoToggle.checked;
+
+      try {
+        localStorage.setItem(AUTO_KEY, this.autoEnabled ? "1" : "0");
+      } catch (error) {
+        // abaikan
+      }
+
+      // Klik toggle = gestur user, jadi audio boleh disiapkan di sini
+      if (this.autoEnabled) {
+        this.prepareAudio();
+      }
+
+      this.resetAuto();
+      this.syncAutoTimer();
     });
 
     this.rotateBtn.addEventListener("click", () => {
@@ -433,6 +670,8 @@ export class CubeScanner {
 
     this.overlay.hidden = false;
 
+    this.resetAuto();
+
     this.render();
 
     await this.startCamera();
@@ -440,6 +679,8 @@ export class CubeScanner {
 
   close() {
     this.isOpen = false;
+
+    this.stopAutoTimer();
 
     this.overlay.hidden = true;
 
@@ -487,6 +728,8 @@ export class CubeScanner {
       this.cameraReady = true;
 
       this.showMessage("");
+
+      this.syncAutoTimer();
     } catch (error) {
       console.error(error);
 
@@ -554,8 +797,8 @@ export class CubeScanner {
     image.src = url;
   }
 
-  // Ambil kotak tengah dari sumber, lalu sampling 3x3 sel
-  processSource(source, width, height) {
+  // Gambar kotak tengah dari sumber ke kanvas sampling
+  drawSource(source, width, height) {
     const side = Math.min(width, height);
 
     this.sampleCtx.drawImage(
@@ -569,32 +812,17 @@ export class CubeScanner {
       SAMPLE_SIZE,
       SAMPLE_SIZE,
     );
+  }
 
-    const margin = GRID_MARGIN * SAMPLE_SIZE;
-    const cell = (SAMPLE_SIZE - margin * 2) / 3;
-    const half = (cell * CELL_SAMPLE_RATIO) / 2;
+  readFrame() {
+    return this.sampleCtx.getImageData(0, 0, SAMPLE_SIZE, SAMPLE_SIZE).data;
+  }
 
-    const cells = [];
+  // Ambil kotak tengah dari sumber, lalu sampling 3x3 sel
+  processSource(source, width, height) {
+    this.drawSource(source, width, height);
 
-    for (let row = 0; row < 3; row++) {
-      for (let col = 0; col < 3; col++) {
-        const cx = margin + cell * (col + 0.5);
-        const cy = margin + cell * (row + 0.5);
-
-        const size = Math.max(2, Math.round(half * 2));
-
-        const data = this.sampleCtx.getImageData(
-          Math.round(cx - half),
-          Math.round(cy - half),
-          size,
-          size,
-        ).data;
-
-        const rgb = medianRgb(data);
-
-        cells.push({ rgb, lab: rgbToLab(rgb) });
-      }
-    }
+    const cells = extractCells(this.readFrame());
 
     this.samples[STEPS[this.stepIndex].face] = cells;
 
@@ -616,6 +844,180 @@ export class CubeScanner {
     this.close();
 
     this.onComplete(cube);
+  }
+
+  // ----------------------------------------
+  // AUTO-AMBIL
+  // ----------------------------------------
+
+  resetAuto() {
+    this.armed = true;
+    this.history = [];
+    this.lastRgbs = null;
+
+    this.viewport.classList.remove("aligned");
+
+    this.setAutoStatus("", 0);
+  }
+
+  syncAutoTimer() {
+    this.stopAutoTimer();
+
+    if (this.isOpen && this.cameraReady && this.autoEnabled) {
+      this.autoTimer = setInterval(() => this.autoTick(), AUTO_INTERVAL_MS);
+    } else {
+      this.setAutoStatus("", 0);
+
+      this.viewport.classList.remove("aligned");
+    }
+  }
+
+  stopAutoTimer() {
+    if (this.autoTimer) {
+      clearInterval(this.autoTimer);
+    }
+
+    this.autoTimer = null;
+  }
+
+  setAutoStatus(text, progress) {
+    this.autoStatusEl.textContent = text;
+    this.autoStatusEl.hidden = !text;
+
+    this.autoBarEl.hidden = !text;
+    this.autoFillEl.style.width = `${Math.round(progress * 100)}%`;
+  }
+
+  prepareAudio() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+
+      if (Ctx && !this.audioCtx) {
+        this.audioCtx = new Ctx();
+      }
+
+      if (this.audioCtx && this.audioCtx.state === "suspended") {
+        this.audioCtx.resume();
+      }
+    } catch (error) {
+      this.audioCtx = null;
+    }
+  }
+
+  feedback() {
+    try {
+      if (navigator.vibrate) {
+        navigator.vibrate(60);
+      }
+    } catch (error) {
+      // abaikan
+    }
+
+    try {
+      if (this.audioCtx) {
+        const osc = this.audioCtx.createOscillator();
+        const gain = this.audioCtx.createGain();
+
+        osc.frequency.value = 880;
+        gain.gain.value = 0.08;
+
+        osc.connect(gain);
+        gain.connect(this.audioCtx.destination);
+
+        osc.start();
+        osc.stop(this.audioCtx.currentTime + 0.09);
+      }
+    } catch (error) {
+      // abaikan
+    }
+  }
+
+  autoTick() {
+    if (!this.isOpen || !this.cameraReady || !this.autoEnabled) {
+      return;
+    }
+
+    if (!this.video.videoWidth) {
+      return;
+    }
+
+    const step = STEPS[this.stepIndex];
+
+    // Auto hanya untuk sisi yang belum di-scan.
+    // Mengulang sisi lain dilakukan manual lewat Ambil ulang.
+    if (this.samples[step.face]) {
+      this.viewport.classList.remove("aligned");
+
+      this.setAutoStatus(
+        STEPS.every((st) => this.samples[st.face])
+          ? "Semua sisi sudah di-scan."
+          : "Sisi ini sudah di-scan. Pilih sisi lain.",
+        0,
+      );
+
+      return;
+    }
+
+    this.drawSource(this.video, this.video.videoWidth, this.video.videoHeight);
+
+    const result = analyzeFrame(this.readFrame());
+
+    const now = performance.now();
+
+    this.viewport.classList.toggle("aligned", result.aligned);
+
+    // Setelah mengambil gambar, tunggu kubus dipindah / diputar
+    if (!this.armed) {
+      const away = !result.aligned || colorsChanged(result.rgbs, this.lastRgbs);
+
+      if (now - this.lastCaptureAt > AUTO_REARM_DELAY_MS && away) {
+        this.armed = true;
+        this.history = [];
+      } else {
+        this.setAutoStatus("Putar kubus ke sisi berikutnya...", 0);
+
+        return;
+      }
+    }
+
+    if (!result.aligned) {
+      this.history = [];
+
+      this.setAutoStatus("Sejajarkan kubus dengan grid", 0);
+
+      return;
+    }
+
+    this.history.push(result.rgbs);
+
+    if (!framesStable(this.history)) {
+      this.history = [result.rgbs];
+
+      this.setAutoStatus("Tahan kubus agar diam...", 0);
+
+      return;
+    }
+
+    if (this.history.length < AUTO_STABLE_FRAMES) {
+      this.setAutoStatus(
+        "Tahan...",
+        this.history.length / AUTO_STABLE_FRAMES,
+      );
+
+      return;
+    }
+
+    // Pas & diam: ambil gambar
+    this.armed = false;
+    this.lastRgbs = result.rgbs;
+    this.lastCaptureAt = now;
+    this.history = [];
+
+    this.feedback();
+
+    this.captureFromCamera();
+
+    this.setAutoStatus("✓ Terambil", 1);
   }
 
   // ----------------------------------------
@@ -705,25 +1107,4 @@ export class CubeScanner {
       this.netEl.appendChild(mini);
     });
   }
-}
-
-// Median per channel (tahan terhadap pantulan / noise)
-function medianRgb(data) {
-  const r = [];
-  const g = [];
-  const b = [];
-
-  for (let i = 0; i < data.length; i += 4) {
-    r.push(data[i]);
-    g.push(data[i + 1]);
-    b.push(data[i + 2]);
-  }
-
-  const median = (arr) => {
-    arr.sort((x, y) => x - y);
-
-    return arr[Math.floor(arr.length / 2)];
-  };
-
-  return [median(r), median(g), median(b)];
 }

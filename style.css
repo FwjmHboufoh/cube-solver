@@ -660,3 +660,64 @@ button:disabled {
 .scan-edge.bottom { bottom: 2%; left: 12%; right: 12%; height: 7%; }
 .scan-edge.left   { left: 2%;   top: 12%;  bottom: 12%; width: 7%; }
 .scan-edge.right  { right: 2%;  top: 12%;  bottom: 12%; width: 7%; }
+
+/* Auto-ambil */
+
+.scan-auto {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    margin-bottom: 8px;
+
+    font-size: 0.88rem;
+    cursor: pointer;
+}
+
+.scan-viewport.aligned .scan-grid span {
+    border-color: #4cff88;
+}
+
+.scan-auto-status {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+
+    padding: 4px 12px;
+
+    font-size: 0.8rem;
+    white-space: nowrap;
+
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 999px;
+
+    pointer-events: none;
+}
+
+.scan-auto-status[hidden],
+.scan-auto-bar[hidden] {
+    display: none;
+}
+
+.scan-auto-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+
+    height: 6px;
+
+    background: rgba(255, 255, 255, 0.2);
+
+    pointer-events: none;
+}
+
+.scan-auto-bar > div {
+    height: 100%;
+    width: 0;
+
+    background: #4cff88;
+
+    transition: width 0.12s linear;
+}
